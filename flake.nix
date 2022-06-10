@@ -23,6 +23,7 @@
       rec {
         devShells.default = pkgs.mkShell {
           packages = [
+            pkgs.cargo-watch
             rustChannel.rust
             pkgs.rust-analyzer
           ];
