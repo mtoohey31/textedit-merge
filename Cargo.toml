@@ -1,6 +1,6 @@
 [package]
 name = "textedit-merge"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Matthew Toohey <contact@mtoohey.com>"]
 description = "A library for sorting and merging text edits."
