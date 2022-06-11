@@ -1,6 +1,6 @@
 # textedit-merge
 
-A library for sorting and merging text edits.
+A library for sorting and merging textedits.
 
 ## License
 

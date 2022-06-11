@@ -1,9 +1,9 @@
 [package]
 name = "textedit-merge"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["Matthew Toohey <contact@mtoohey.com>"]
-description = "A library for sorting and merging text edits."
+description = "A library for sorting and merging textedits."
 readme = "README.md"
 homepage = "https://github.com/mtoohey31/textedit-merge"
 repository = "https://github.com/mtoohey31/textedit-merge"
