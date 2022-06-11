@@ -1,53 +1,20 @@
 use std::ops::Range;
 
-const TEXT: &str = r#"args@{	z	,	}	:
+const TEXT: &str = r#"{
+mkValueStringDefault = {}: v: with builtins;
+let err = t: v: abort
+"oups";
+in 92;
+}
+"#;
 
-		  	{
-		a	 =  	 	"1"	;
-		b	 =	 {	} 	// 	{	}	;		
-		c 	=	   	z	.	y	;
-		d 	=	 1.2	;	
-	e 	=	   5	  	;
-		f	 = 	./test		;
-			g	 = 	true	;		
-		h 		=	 null	;
-	i 	  		=	 [	 1	 ./example.bin	 { 		hello	=		"world"	;	 } 	]	;	
-			j 	= 		5	 * 			5;			
-	k     = z ? fs		    ;
-	l   = z 		++		 z;
-	m 	=	 - 324		;
-	n = z		  z    ;	
-	o = import 	 	 	 		<nixpkgs>		;
-	p = with z; "fdsfs";			    
-	q = ''
-  ${5+5}
-	'';
-	r = " f${z}ds ";
-		  	  		 }"#;
-
-const EXPECTED: &str = r#"args@{ z, }:
-
-{
-  a = "1";
-  b = { } // { };
-  c = z.y;
-  d = 1.2;
-  e = 5;
-  f = ./test;
-  g = true;
-  h = null;
-  i = [ 1 ./example.bin { hello = "world"; } ];
-  j = 5 * 5;
-  k = z ? fs;
-  l = z ++ z;
-  m = - 324;
-  n = z z;
-  o = import <nixpkgs>;
-  p = with z; "fdsfs";
-  q = ''
-      ${5+5}
-    	'';
-  r = " f${z}ds ";
+const EXPECTED: &str = r#"{
+  mkValueStringDefault = {}: v: with builtins;
+    let
+      err = t: v: abort
+        "oups";
+    in
+    92;
 }
 "#;
 
@@ -72,7 +39,7 @@ pub fn merge<T: AsRef<str>>(
             total_expansion_so_far -= r.len() as isize;
         }
         dbg!(edits1[i].0.start, edits2[j].0.start, total_expansion_so_far);
-        if edits1[i].0.start <= (edits2[j].0.start as isize - total_expansion_so_far) as usize {
+        if edits1[i].0.start < (edits2[j].0.start as isize - total_expansion_so_far) as usize {
             // the next edits1 element comes first
             let expansion = edits1[i].1.len() as isize - edits1[i].0.len() as isize;
 
@@ -103,6 +70,8 @@ pub fn merge<T: AsRef<str>>(
                     edits1[i].1 = new;
                     dbg!("12ss");
                 } else {
+                    dbg!(&edits1[i]);
+                    dbg!(&edits2[j]);
                     // in this case they overlap normally, so we take a part from the start of
                     // edits1[i], along with the all of edits2[j]
                     let from1 = &edits1[i].1
@@ -118,35 +87,6 @@ pub fn merge<T: AsRef<str>>(
                         edits2[k].0.end = (edits2[k].0.end as isize + expansion) as usize;
                     }
                     edits1[i].1 = new;
-
-                    // the potential extension of this element of edits1 may have led to
-                    // overlapping consecutive elements in edits1, so this handles that
-                    // while edits1[i].0.end > edits1[i + 1].0.start {
-                    //     dbg!(&edits1[i], &edits1[i + 1]);
-                    //     if edits1[i].0.end > edits1[i + 1].0.end {
-                    //         todo!();
-                    //     } else {
-                    //         // we prefer the first element here because its end is from an element
-                    //         // of edits2
-                    //         let from2 = &edits2[j].1[edits1[i].0.end - edits1[i + 1].0.start..];
-                    //         let mut new = String::with_capacity(edits1[i].1.len() + from2.len());
-                    //         new.push_str(&edits1[i].1);
-                    //         new.push_str(from2);
-
-                    //         let expansion = -3;
-                    //         for k in j..edits2.len() {
-                    //             edits2[k].0.start =
-                    //                 (edits2[k].0.start as isize + expansion) as usize;
-                    //             edits2[k].0.end = (edits2[k].0.end as isize + expansion) as usize;
-                    //         }
-
-                    //         edits1[i].0.end = edits1[i + 1].0.end;
-                    //         edits1[i].1 = new;
-
-                    //         edits1.remove(i + 1);
-                    //     }
-                    //     dbg!(&edits1[i]);
-                    // }
 
                     dbg!("12ov");
                 }
@@ -252,7 +192,6 @@ mod tests {
         assert_eq!("hi earth", apply(&apply(&text, &edits1), &edits2));
 
         let new_edits = merge(&edits1, &edits2);
-        dbg!(&new_edits);
         assert_eq!("hi earth", apply(&text, &new_edits));
     }
 
@@ -311,7 +250,7 @@ mod tests {
         assert_eq!("hi world", apply(&text, &new_edits));
     }
 
-    // #[test]
+    #[test]
     fn attr_fn() {
         let text = r#"{
   f = { x
@@ -344,7 +283,24 @@ mod tests {
         assert_eq!(expected, apply(text, &new_edits));
     }
 
-    // #[test]
+    #[test]
+    fn curried_fn() {
+        let edits1 = vec![(50..51, "\n"), (79..80, "\n")];
+        let edits2 = vec![
+            (1..2, "\n  "),
+            (46..47, "\n    "),
+            (50..51, "\n      "),
+            (68..69, "\n        "),
+            (76..77, "\n    "),
+            (79..80, "\n    "),
+        ];
+        assert_eq!(EXPECTED, apply(&apply(TEXT, &edits1), &edits2));
+
+        let new_edits = merge(&edits1, &edits2);
+        assert_eq!(EXPECTED, apply(TEXT, &new_edits));
+    }
+
+    #[test]
     fn indent_lambda_top_level() {
         let text = r#"import ./make-test-python.nix ({pkgs, lib, ...}:
 
@@ -352,8 +308,7 @@ let
   bar = 57;
 in {
   baz = qux;
-})
-"#;
+})"#;
 
         let expected = r#"import ./make-test-python.nix ({ pkgs, lib, ... }:
 
@@ -364,7 +319,7 @@ in
   baz = qux;
 })
 "#;
-        let edits1 = vec![(86..86, "\n"), (32..32, " "), (46..46, " "), (68..69, "\n")];
+        let edits1 = vec![(32..32, " "), (46..46, " "), (68..69, "\n"), (86..86, "\n")];
         let edits2 = vec![];
         assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
@@ -374,6 +329,56 @@ in
 
     #[test]
     fn indent_tabs_2() {
+        let text = r#"args@{	z	,	}	:
+
+		  	{
+		a	 =  	 	"1"	;
+		b	 =	 {	} 	// 	{	}	;		
+		c 	=	   	z	.	y	;
+		d 	=	 1.2	;	
+	e 	=	   5	  	;
+		f	 = 	./test		;
+			g	 = 	true	;		
+		h 		=	 null	;
+	i 	  		=	 [	 1	 ./example.bin	 { 		hello	=		"world"	;	 } 	]	;	
+			j 	= 		5	 * 			5;			
+	k     = z ? fs		    ;
+	l   = z 		++		 z;
+	m 	=	 - 324		;
+	n = z		  z    ;	
+	o = import 	 	 	 		<nixpkgs>		;
+	p = with z; "fdsfs";			    
+	q = ''
+  ${5+5}
+	'';
+	r = " f${z}ds ";
+		  	  		 }"#;
+
+        let expected = r#"args@{ z, }:
+
+{
+  a = "1";
+  b = { } // { };
+  c = z.y;
+  d = 1.2;
+  e = 5;
+  f = ./test;
+  g = true;
+  h = null;
+  i = [ 1 ./example.bin { hello = "world"; } ];
+  j = 5 * 5;
+  k = z ? fs;
+  l = z ++ z;
+  m = - 324;
+  n = z z;
+  o = import <nixpkgs>;
+  p = with z; "fdsfs";
+  q = ''
+      ${5+5}
+    	'';
+  r = " f${z}ds ";
+}
+"#;
         let edits1 = vec![
             (6..7, " "),
             (8..9, ""),
@@ -463,10 +468,9 @@ in
             (311..313, "\n  "),
             (329..340, "\n"),
         ];
-        assert_eq!(EXPECTED, apply(&apply(TEXT, &edits1), &edits2));
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
         let new_edits = merge(&edits1, &edits2);
-        dbg!(&new_edits);
-        assert_eq!(EXPECTED, apply(TEXT, &new_edits));
+        assert_eq!(expected, apply(text, &new_edits));
     }
 }
