@@ -1,27 +1,49 @@
 use std::ops::Range;
 
-const TEXT: &str = r#"[1
-
-# first block
-2
-3
-
-# second block
-4
-5]
+const TEXT: &str = r#"{
+  # how to string-format the option name;
+  # by default one character is a short option (`-`),
+  # more than one characters a long option (`--`).
+  mkOptionName ?
+  k: if builtins.stringLength k == 1
+    then "-${k}"
+    else "--${k}"
+, mkOption ? k: v:
+  if v == null
+  then [ ]
+  else [ (mkOptionName k) (lib.generators.mkValueStringDefault { } v) ]
+}:
+{  toINI = {
+  # parameter comment
+  mkSectionName ? (name: libStr.escape [ "[" "]" ] name)
+  , mkKeyValue ? mkKeyValueDefault {} "="
+  }: attrsOfAttrs:
+    mapAttrsToStringsSep "\n" mkSection attrsOfAttrs;
+}
 "#;
 
-const EXPECTED: &str = r#"[
-  1
-
-  # first block
-  2
-  3
-
-  # second block
-  4
-  5
-]
+const EXPECTED: &str = r#"{
+  # how to string-format the option name;
+  # by default one character is a short option (`-`),
+  # more than one characters a long option (`--`).
+  mkOptionName ? k:
+    if builtins.stringLength k == 1
+    then "-${k}"
+    else "--${k}"
+, mkOption ? k: v:
+    if v == null
+    then [ ]
+    else [ (mkOptionName k) (lib.generators.mkValueStringDefault { } v) ]
+}:
+{
+  toINI =
+    {
+      # parameter comment
+      mkSectionName ? (name: libStr.escape [ "[" "]" ] name)
+    , mkKeyValue ? mkKeyValueDefault { } "="
+    }: attrsOfAttrs:
+    mapAttrsToStringsSep "\n" mkSection attrsOfAttrs;
+}
 "#;
 
 pub fn merge<T: AsRef<str>>(
@@ -29,6 +51,7 @@ pub fn merge<T: AsRef<str>>(
     edits2: &[(Range<usize>, T)],
 ) -> Vec<(Range<usize>, String)> {
     let (mut i, mut j) = (0, 0);
+
     let mut edits1 = edits1
         .iter()
         .map(|(r, s)| (r.clone(), s.as_ref().to_string()))
@@ -38,13 +61,12 @@ pub fn merge<T: AsRef<str>>(
         .map(|(r, s)| (r.clone(), s.as_ref().to_string()))
         .collect::<Vec<_>>();
     let mut res: Vec<(Range<usize>, String)> = Vec::new();
+
+    let mut total_expansion_so_far = 0;
     while i < edits1.len() && j < edits2.len() {
-        let mut total_expansion_so_far = 0;
-        for (r, s) in &res {
-            total_expansion_so_far += s.len() as isize;
-            total_expansion_so_far -= r.len() as isize;
-        }
+        #[cfg(test)]
         dbg!(edits1[i].0.start, edits2[j].0.start, total_expansion_so_far);
+
         if edits1[i].0.start < (edits2[j].0.start as isize - total_expansion_so_far) as usize {
             // the next edits1 element comes first
             let expansion = edits1[i].1.len() as isize - edits1[i].0.len() as isize;
@@ -54,8 +76,12 @@ pub fn merge<T: AsRef<str>>(
             {
                 // in this case, the edits are completely non-overlapping, so we just move the one
                 // along, and adjust all following elements of edits2 by the expansion
+                total_expansion_so_far += edits1[i].1.len() as isize;
+                total_expansion_so_far -= edits1[i].0.len() as isize;
                 res.push(edits1[i].clone());
                 i += 1;
+
+                #[cfg(test)]
                 dbg!("12dj");
             } else {
                 // in this case, they overlap in some way. edits2[j] happens second, so we merge
@@ -78,10 +104,9 @@ pub fn merge<T: AsRef<str>>(
                     // TODO: find something to test this, cause I think I need to adjust more stuff
                     // here
 
+                    #[cfg(test)]
                     dbg!("12ss");
                 } else {
-                    dbg!(&edits1[i]);
-                    dbg!(&edits2[j]);
                     // in this case they overlap normally, so we take a part from the start of
                     // edits1[i], along with the all of edits2[j]
                     let from1 = &edits1[i].1
@@ -98,6 +123,7 @@ pub fn merge<T: AsRef<str>>(
                     }
                     edits1[i].1 = new;
 
+                    #[cfg(test)]
                     dbg!("12ov");
                 }
                 j += 1;
@@ -113,66 +139,73 @@ pub fn merge<T: AsRef<str>>(
                     edits2[k].0.start = (edits2[k].0.start as isize + expansion) as usize;
                     edits2[k].0.end = (edits2[k].0.end as isize + expansion) as usize;
                 }
-                let mut total_expansion_so_far = 0;
-                for (r, s) in &res {
-                    total_expansion_so_far += s.len() as isize;
-                    total_expansion_so_far -= r.len() as isize;
-                }
                 edits2[j].0.start = (edits2[j].0.start as isize - total_expansion_so_far) as usize;
                 edits2[j].0.end = (edits2[j].0.end as isize - total_expansion_so_far) as usize;
 
+                total_expansion_so_far += edits2[j].1.len() as isize;
+                total_expansion_so_far -= edits2[j].0.len() as isize;
                 res.push(edits2[j].clone());
                 j += 1;
+
+                #[cfg(test)]
                 dbg!("21dj");
             } else {
                 // in this case, they overlap in some way. edits1[i] happens second, so we merge things as such
-                if edits1[i].0.end < edits2[j].0.end {
+                if edits1[i].0.start + edits1[i].1.len() <= edits2[j].0.end {
                     // in this case, the area updated by edits1[i] is a subset of the area updated
                     // by edits2[j], so we just update the end of edits2[j] (since it will overwrite
                     // all of the text written by edits1[i]) by the expansion factor of edits1[i]
                     let expansion = edits1[i].1.len() as isize - edits1[i].0.len() as isize;
                     edits2[j].0.end = (edits2[j].0.end as isize - expansion) as usize;
 
-                    if (i, j) != (2, 5) {
-                        dbg!("shifting");
-                        let expansion = edits1[i].1.len() as isize - edits1[i].0.len() as isize;
-                        for k in j + 1..edits2.len() {
-                            edits2[k].0.start = (edits2[k].0.start as isize - expansion) as usize;
-                            edits2[k].0.end = (edits2[k].0.end as isize - expansion) as usize;
-                        }
+                    let expansion = edits1[i].1.len() as isize - edits1[i].0.len() as isize;
+                    for k in j + 1..edits2.len() {
+                        edits2[k].0.start = (edits2[k].0.start as isize - expansion) as usize;
+                        edits2[k].0.end = (edits2[k].0.end as isize - expansion) as usize;
                     }
 
+                    #[cfg(test)]
                     dbg!("21ss");
                 } else {
+                    dbg!(&edits1[i], &edits2[j]);
+
                     // in this case, they overlap normally, so we take all of edits2[j]'s insert
                     // and part of edits1[i]'s
-                    let from1 = &edits1[i].1[edits2[j].0.end - edits1[i].0.start..];
+                    let from1 = &edits1[i].1[(edits2[j].0.end as isize
+                        - total_expansion_so_far
+                        - edits1[i].0.start as isize)
+                        as usize..];
                     let mut new = String::with_capacity(from1.len() + edits2[j].1.len());
                     new.push_str(&edits2[j].1);
                     new.push_str(&from1);
-                    edits2[j].0.end = edits1[i].0.end;
+                    edits2[j].0.end = (edits1[i].0.end as isize + total_expansion_so_far) as usize;
+
+                    let expansion = new.len() as isize - edits2[j].1.len() as isize;
+                    for k in j + 1..edits2.len() {
+                        edits2[k].0.start = (edits2[k].0.start as isize - expansion) as usize;
+                        edits2[k].0.end = (edits2[k].0.end as isize - expansion) as usize;
+                    }
+
                     edits2[j].1 = new;
+
+                    #[cfg(test)]
                     dbg!("21ov");
                 }
                 i += 1;
             }
         }
 
+        // #[cfg(test)]
         // if edits1.len() > 1 {
         //     let mut combined = res.clone();
         //     combined.extend_from_slice(&edits1[i..]);
         //     dbg!(i, j, &edits1[i..], &edits2[j..], &res);
-        //     let intermediate = apply(&TEXT, &combined);
+        //     let intermediate = tests::apply(&TEXT, &combined);
         //     dbg!(&intermediate);
-        //     assert_eq!(EXPECTED, apply(&intermediate, &edits2[j..]));
+        //     assert_eq!(EXPECTED, tests::apply(&intermediate, &edits2[j..]));
         // }
     }
     res.extend_from_slice(&edits1[i..]);
-    let mut total_expansion_so_far = 0;
-    for (r, s) in &res {
-        total_expansion_so_far += s.len() as isize;
-        total_expansion_so_far -= r.len() as isize;
-    }
     for (r, s) in edits2[j..].into_iter() {
         let mut r = r.clone();
         r.start = (r.start as isize - total_expansion_so_far) as usize;
@@ -182,92 +215,98 @@ pub fn merge<T: AsRef<str>>(
     res
 }
 
-fn apply<T: AsRef<str>>(text: &str, edits: &[(Range<usize>, T)]) -> String {
-    let mut len = text.len();
-    for (r, s) in edits {
-        len += s.as_ref().len();
-        len -= r.len();
-    }
-
-    let mut res = String::with_capacity(len);
-    let mut prev = 0;
-    for (r, s) in edits {
-        res.push_str(&text[prev..r.start]);
-        res.push_str(s.as_ref());
-        prev = r.end;
-    }
-    res.push_str(&text[prev..]);
-    res
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    pub fn apply<T: AsRef<str>>(text: &str, edits: &[(Range<usize>, T)]) -> String {
+        let mut len = text.len();
+        for (r, s) in edits {
+            len += s.as_ref().len();
+            len -= r.len();
+        }
+
+        let mut res = String::with_capacity(len);
+        let mut prev = 0;
+        for (r, s) in edits {
+            res.push_str(&text[prev..r.start]);
+            res.push_str(s.as_ref());
+            prev = r.end;
+        }
+        res.push_str(&text[prev..]);
+        res
+    }
+
     #[test]
     fn non_overlapping_1_2() {
-        let text = String::from("hello world");
+        let text = "hello world";
+        let expected = "hi earth";
         let edits1 = vec![(0..5, "hi")];
         let edits2 = vec![(3..8, "earth")];
-        assert_eq!("hi earth", apply(&apply(&text, &edits1), &edits2));
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
         let new_edits = merge(&edits1, &edits2);
-        assert_eq!("hi earth", apply(&text, &new_edits));
+        assert_eq!(expected, apply(text, &new_edits));
     }
 
     #[test]
     fn non_overlapping_2_1() {
-        let text = String::from("hello world");
+        let text = "hello world";
+        let expected = "hi earth";
         let edits1 = vec![(6..11, "earth")];
         let edits2 = vec![(0..5, "hi")];
-        assert_eq!("hi earth", apply(&apply(&text, &edits1), &edits2));
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
         let new_edits = merge(&edits1, &edits2);
-        assert_eq!("hi earth", apply(&text, &new_edits));
+        assert_eq!(expected, apply(text, &new_edits));
     }
 
     #[test]
     fn overlapping_1_2() {
-        let text = String::from("hello to the world");
+        let text = "hello to the world";
+        let expected = "hi earth";
         let edits1 = vec![(0..12, "hi there")];
         let edits2 = vec![(3..14, "earth")];
-        assert_eq!("hi earth", apply(&apply(&text, &edits1), &edits2));
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
         let new_edits = merge(&edits1, &edits2);
-        assert_eq!("hi earth", apply(&text, &new_edits));
+        assert_eq!(expected, apply(text, &new_edits));
     }
 
     #[test]
     fn overlapping_2_1() {
-        let text = String::from("hello to the world");
+        let text = "hello to the world";
+        let expected = "hi earth";
         let edits1 = vec![(9..18, "big earth")];
         let edits2 = vec![(0..12, "hi")];
-        assert_eq!("hi earth", apply(&apply(&text, &edits1), &edits2));
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
         let new_edits = merge(&edits1, &edits2);
-        assert_eq!("hi earth", apply(&text, &new_edits));
+        assert_eq!(expected, apply(text, &new_edits));
     }
 
     #[test]
     fn subset_1_2() {
-        let text = String::from("hello big earth");
+        let text = "hello big earth";
+        let expected = "hi small world";
         let edits1 = vec![(0..15, "hi big world")];
         let edits2 = vec![(3..6, "small")];
-        assert_eq!("hi small world", apply(&apply(&text, &edits1), &edits2));
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
         let new_edits = merge(&edits1, &edits2);
-        assert_eq!("hi small world", apply(&text, &new_edits));
+        assert_eq!(expected, apply(text, &new_edits));
     }
 
     #[test]
     fn subset_2_1() {
-        let text = String::from("hello big earth");
+        let text = "hello big earth";
+        let expected = "hi world";
         let edits1 = vec![(6..9, "small")];
         let edits2 = vec![(0..17, "hi world")];
-        assert_eq!("hi world", apply(&apply(&text, &edits1), &edits2));
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
         let new_edits = merge(&edits1, &edits2);
-        assert_eq!("hi world", apply(&text, &new_edits));
+        assert_eq!(expected, apply(text, &new_edits));
     }
 
     #[test]
@@ -340,6 +379,29 @@ in 92;
 
     #[test]
     fn existing_blank_lines() {
+        let text = r#"[1
+
+# first block
+2
+3
+
+# second block
+4
+5]
+"#;
+
+        let expected = r#"[
+  1
+
+  # first block
+  2
+  3
+
+  # second block
+  4
+  5
+]
+"#;
         let edits1 = vec![(1..1, "\n"), (41..41, "\n")];
         let edits2 = vec![
             (1..2, "\n  "),
@@ -350,10 +412,10 @@ in 92;
             (38..39, "\n  "),
             (40..41, "\n  "),
         ];
-        assert_eq!(EXPECTED, apply(&apply(TEXT, &edits1), &edits2));
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
         let new_edits = merge(&edits1, &edits2);
-        assert_eq!(EXPECTED, apply(TEXT, &new_edits));
+        assert_eq!(expected, apply(text, &new_edits));
     }
 
     #[test]
@@ -523,6 +585,82 @@ in
             (307..307, "    "),
             (311..313, "\n  "),
             (329..340, "\n"),
+        ];
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
+
+        let new_edits = merge(&edits1, &edits2);
+        assert_eq!(expected, apply(text, &new_edits));
+    }
+
+    #[test]
+    fn indented_lambda() {
+        let text = r#"{
+  # how to string-format the option name;
+  # by default one character is a short option (`-`),
+  # more than one characters a long option (`--`).
+  mkOptionName ?
+  k: if builtins.stringLength k == 1
+    then "-${k}"
+    else "--${k}"
+, mkOption ? k: v:
+  if v == null
+  then [ ]
+  else [ (mkOptionName k) (lib.generators.mkValueStringDefault { } v) ]
+}:
+{  toINI = {
+  # parameter comment
+  mkSectionName ? (name: libStr.escape [ "[" "]" ] name)
+  , mkKeyValue ? mkKeyValueDefault {} "="
+  }: attrsOfAttrs:
+    mapAttrsToStringsSep "\n" mkSection attrsOfAttrs;
+}
+"#;
+
+        let expected = r#"{
+  # how to string-format the option name;
+  # by default one character is a short option (`-`),
+  # more than one characters a long option (`--`).
+  mkOptionName ? k:
+    if builtins.stringLength k == 1
+    then "-${k}"
+    else "--${k}"
+, mkOption ? k: v:
+    if v == null
+    then [ ]
+    else [ (mkOptionName k) (lib.generators.mkValueStringDefault { } v) ]
+}:
+{
+  toINI =
+    {
+      # parameter comment
+      mkSectionName ? (name: libStr.escape [ "[" "]" ] name)
+    , mkKeyValue ? mkKeyValueDefault { } "="
+    }: attrsOfAttrs:
+    mapAttrsToStringsSep "\n" mkSection attrsOfAttrs;
+}
+"#;
+
+        let edits1 = vec![
+            (1..4, "\n"),
+            (165..168, " "),
+            (170..171, "\n"),
+            (359..361, "\n"),
+            (368..369, "\n"),
+            (370..373, "\n"),
+            (486..486, " "),
+        ];
+        let edits2 = vec![
+            (1..2, "\n  "),
+            (166..167, "\n    "),
+            (252..255, "\n    "),
+            (267..270, "\n    "),
+            (278..281, "\n    "),
+            (355..356, "\n  "),
+            (363..364, "\n    "),
+            (365..366, "\n      "),
+            (385..388, "\n      "),
+            (442..445, "\n    "),
+            (485..488, "\n    "),
         ];
         assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
 
