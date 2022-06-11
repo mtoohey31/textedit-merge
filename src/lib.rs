@@ -1,21 +1,27 @@
 use std::ops::Range;
 
-const TEXT: &str = r#"{
-mkValueStringDefault = {}: v: with builtins;
-let err = t: v: abort
-"oups";
-in 92;
-}
+const TEXT: &str = r#"[1
+
+# first block
+2
+3
+
+# second block
+4
+5]
 "#;
 
-const EXPECTED: &str = r#"{
-  mkValueStringDefault = {}: v: with builtins;
-    let
-      err = t: v: abort
-        "oups";
-    in
-    92;
-}
+const EXPECTED: &str = r#"[
+  1
+
+  # first block
+  2
+  3
+
+  # second block
+  4
+  5
+]
 "#;
 
 pub fn merge<T: AsRef<str>>(
@@ -68,6 +74,10 @@ pub fn merge<T: AsRef<str>>(
                     new.push_str(&edits2[j].1);
                     new.push_str(from1_end);
                     edits1[i].1 = new;
+
+                    // TODO: find something to test this, cause I think I need to adjust more stuff
+                    // here
+
                     dbg!("12ss");
                 } else {
                     dbg!(&edits1[i]);
@@ -94,7 +104,7 @@ pub fn merge<T: AsRef<str>>(
             }
         } else {
             // the next edits2 element comes first
-            if edits1[i].0.start >= edits2[j].0.end {
+            if edits1[i].0.start >= (edits2[j].0.end as isize - total_expansion_so_far) as usize {
                 // in this case, the edits are also completely non-overlapping, so we also move the
                 // one along, and there's no need to adjust anything by expansion because edits in
                 // edits2 happen after those in edits1
@@ -122,6 +132,16 @@ pub fn merge<T: AsRef<str>>(
                     // all of the text written by edits1[i]) by the expansion factor of edits1[i]
                     let expansion = edits1[i].1.len() as isize - edits1[i].0.len() as isize;
                     edits2[j].0.end = (edits2[j].0.end as isize - expansion) as usize;
+
+                    if (i, j) != (2, 5) {
+                        dbg!("shifting");
+                        let expansion = edits1[i].1.len() as isize - edits1[i].0.len() as isize;
+                        for k in j + 1..edits2.len() {
+                            edits2[k].0.start = (edits2[k].0.start as isize - expansion) as usize;
+                            edits2[k].0.end = (edits2[k].0.end as isize - expansion) as usize;
+                        }
+                    }
+
                     dbg!("21ss");
                 } else {
                     // in this case, they overlap normally, so we take all of edits2[j]'s insert
@@ -285,6 +305,24 @@ mod tests {
 
     #[test]
     fn curried_fn() {
+        let text = r#"{
+mkValueStringDefault = {}: v: with builtins;
+let err = t: v: abort
+"oups";
+in 92;
+}
+"#;
+
+        let expected = r#"{
+  mkValueStringDefault = {}: v: with builtins;
+    let
+      err = t: v: abort
+        "oups";
+    in
+    92;
+}
+"#;
+
         let edits1 = vec![(50..51, "\n"), (79..80, "\n")];
         let edits2 = vec![
             (1..2, "\n  "),
@@ -293,6 +331,24 @@ mod tests {
             (68..69, "\n        "),
             (76..77, "\n    "),
             (79..80, "\n    "),
+        ];
+        assert_eq!(expected, apply(&apply(text, &edits1), &edits2));
+
+        let new_edits = merge(&edits1, &edits2);
+        assert_eq!(expected, apply(text, &new_edits));
+    }
+
+    #[test]
+    fn existing_blank_lines() {
+        let edits1 = vec![(1..1, "\n"), (41..41, "\n")];
+        let edits2 = vec![
+            (1..2, "\n  "),
+            (3..5, "\n\n  "),
+            (18..19, "\n  "),
+            (20..21, "\n  "),
+            (22..24, "\n\n  "),
+            (38..39, "\n  "),
+            (40..41, "\n  "),
         ];
         assert_eq!(EXPECTED, apply(&apply(TEXT, &edits1), &edits2));
 
