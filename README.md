@@ -1,3 +1,5 @@
+> Archived because I no longer have a use for this. If you decide to use it, please be aware that I know there's a bug in `merge` somewhere, but I haven't been able to reproduce it...
+
 # textedit-merge
 
 A library for sorting and merging textedits.
